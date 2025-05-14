@@ -1,0 +1,1612 @@
+---
+title: "Antarctica"
+author: "Jack Bogner"
+date: "2025-05-02"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options(repos = c(CRAN = "https://cloud.r-project.org"))
+library(ggplot2); library(dplyr); library(knitr)
+library(stringr); library(sf); library(rnaturalearth)
+library(rnaturalearthdata); library(ggspatial)
+library(ggrepel); library(quantarcticR); library(viridis)
+library(dbscan); library(terra); library(purrr)
+library(raster); library(exactextractr); library(FNN)
+library(randomForest); library(nnet); library(tidyr)
+library(e1071); library(gridExtra); library(grid)
+library(kableExtra); library(htmltools)
+setwd("~/R/Antarctica"); set.seed(13)
+```
+
+```{r manual_data, echo=FALSE}
+################################################################################################
+############## All Meteorite Site Names and Lat/Long Missing from Original Data ################
+################################################################################################
+site_names <- c(
+  "Adelie Land", "Allan Hills", "Asuka", "Bates Nunataks", "Beckett Nunatak", 
+  "Belgica", "Bowden Névé", "Buckley Island", "Cumulus Hills", "David Glacier", 
+  "Derrick Peak", "Dominion Range", "Elephant Moraine", "Finger Ridge", 
+  "Frontier Mountain", "Gardner Ridge", "Geologists Range", "Graves Nunataks", 
+  "Grosvenor Mountains", "Grove Mountains", "Inland Forts", "Johannessen Nunataks", 
+  "Klein Glacier", "LaPaz Icefield", "Larkman Nunatak", "Lewis Cliff", "Lonewolf Nunataks", 
+  "MacAlpine Hills", "MacKay Glacier", "Meteorite Hills", "Miller Butte", "Miller Range", 
+  "Mount Baldr", "Mount Cranfield", "Mount Crean", "Mount DeWitt", "Mount Howe", "Mount Pratt", 
+  "Mount Prestrud", "Mount Walton", "Mount Wegener", "Mount Wisting", "Neptune Mountains", 
+  "Odell Glacier", "Outpost Nunatak", "Patriot Hills", "Pecora Escarpment", "Purgatory Peak", 
+  "Reckling Peak", "Roberts Butte", "Roberts Massif", "Sandford Cliffs", "Scott Glacier", 
+  "Stewart Hills", "Taylor Glacier", "Tentacle Ridge", "Thiel Mountains", "Wisconsin Range", "Yamato"
+)
+manual_lat <- c(
+  "Buckley Island" = -84.9500,
+  "Cumulus Hills" = -85.3333,
+  "Finger Ridge" = -79.1833,
+  "Larkman Nunatak" = -86.7667,
+  "Mount Cranfield" = -83.6333,
+  "Mount Crean" = -77.8833,
+  "Mount Pratt" = -80.4000,
+  "Odell Glacier" = -76.7333,
+  "Roberts Massif" = -85.5333,
+  "Sandford Cliffs" = -66.6667
+)
+manual_long <- c(
+  "Buckley Island" = 164.0000,
+  "Cumulus Hills" = -175.0000,
+  "Finger Ridge" = 157.0000,
+  "Larkman Nunatak" = 179.3333,
+  "Mount Cranfield" = 160.9000,
+  "Mount Crean" = 159.5000,
+  "Mount Pratt" = -29.3500,
+  "Odell Glacier" = 159.9167,
+  "Roberts Massif" = -177.0833,
+  "Sandford Cliffs" = 129.8333
+)
+################################################################################################
+######### Source https://www.lpi.usra.edu/lpi/contribution_docs/TR/TR_9307.pdf page 5 ##########
+################################################################################################
+meteorite_sites <- tribble(
+  ~code, ~name, ~lat_dms, ~lon_dms,
+  "A",   "Asuka",                            "72°00'S", "025°00'E",
+  "ALH", "Allan Hills",                      "76°43'S", "159°40'E",
+  "B",   "Belgica Mountains",                "72°35'S", "031°15'E",
+  "BEC", "Beckett Nunatak",                  "76°02'S", "160°11'E",
+  "BOW", "Bowden Neve",                      "83°30'S", "165°00'E",
+  "BTN", "Bates Nunatak",                    "80°15'S", "153°30'E",
+  "DAY", "David Glacier",                    "75°19'S", "162°00'E",
+  "DOM", "Dominion Range",                   "85°20'S", "166°30'E",
+  "DRP", "Derrick Peak",                     "80°04'S", "156°23'E",
+  "EET", "Elephant Moraine",                 "76°11'S", "157°10'E",
+  "FRO", "Frontier Mountains",               "72°59'S", "160°20'E",
+  "GEO", "Geologists Range",                 "82°30'S", "155°30'E",
+  "ORO", "Grosvenor Mountains",              "85°40'S", "175°00'E",
+  "HOW", "Mount Howe",                       "87°22'S", "149°30'W",
+  "ILD", "Inland Forts",                     "77°38'S", "161°00'E",
+  "LAPr","LaPaz Icefield",                   "86°22'S", "070°00'W",
+  "LEW", "Lewis Cliff",                      "84°17'S", "161°05'E",
+  "MAC", "MacAlpine Hills",                  "84°13'S", "160°30'E",
+  "MBR", "Mount Baldr",                      "77°35'S", "160°34'E",
+  "MCY", "Mackay Glacier",                   "76°58'S", "162°00'E",
+  "MET", "Meteorite Hills",                  "79°41'S", "155°45'E",
+  "MIL", "Miller Range",                     "83°15'S", "157°00'E",
+  "OTT", "Outpost Nunatak",                  "75°50'S", "158°12'E",
+  "PAT", "Patuxent Range",                   "84°43'S", "064°30'W",
+  "PCA", "Pecora Escarpment",                "85°38'S", "068°42'W",
+  "POP", "Purgatory Peak",                   "77°20'S", "162°18'E",
+  "QUE", "Queen Alexandra Range",            "84°00'S", "168°00'E",
+  "RKP", "Reckling Moraine Icefield",        "76°16'S", "159°15'E",
+  "STE", "Stewart Hills",                    "84°12'S", "086°00'W",
+  "TYR", "Taylor Glacier",                   "77°44'S", "162°10'E",
+  "TIL", "Thiel Mountains",                  "85°15'S", "091°00'W",
+  "WEG", "Mount Wegener",                    "80°44'S", "023°31'W",
+  "WIS", "Wisconsin Range",                  "85°45'S", "125°00'W",
+  "Y",   "Yamato",                           "71°30'S", "035°40'E"
+)
+################################################################################################
+####################### Mask for Line Clipping in Antarctica Projection ########################
+################################################################################################
+mask_coords <- matrix(c(
+  -20000, 000,
+   20000, 000,
+   20000, -600000,
+  -20000, -600000,
+  -20000, 000
+), ncol = 2, byrow = TRUE); mask_sf <- st_sfc(st_polygon(list(mask_coords)), crs = 3031)
+
+# Not yet used
+region_groups <- list(
+  "Allan Hills-David Glacier" = c(
+    "Allan Hills", "Beckett Nunatak", "David Glacier", "Elephant Moraine",
+    "Mackay Glacier", "Outpost Nunatak", "Reckling Moraine Icefield"
+  ),
+  "Darwin-Byrd Glacier" = c(
+    "Bates Nunatak", "Derrick Peak", "Meteorite Hills", "Lonewolf Nunataks"
+  ),
+  "Beardmore" = c(
+    "Bowden Neve", "Dominion Range", "Geologists Range", "Grosvenor Mountains",
+    "Lewis Cliff", "MacAlpine Hills", "Miller Range", "Queen Alexandra Range"
+  ),
+  "Wisconsin Range-Scott Glacier" = c(
+    "Gardner Ridge", "Graves Nunataks", "Klein Glacier", "Mount Howe",
+    "Mount Prestrud", "Scott Glacier Icefield", "Wisconsin Range", "Mount Wisting"
+  ),
+  "Thiel Mountains-Patuxent" = c(
+    "LaPaz Icefield", "Patuxent Range", "Pecora Escarpment", "Stewart Hills", "Thiel Mountains"
+  )
+)
+
+citation("quantarcticR")
+```
+
+```{r QuickSaveData, echo = FALSE}
+important_objects <- c(
+  "meteor_polygons", "meteor_sf", "smb_sf", "antarctica_proj",
+  "stagnation_df", "ice_velocity_sf", "blue_ice_proj", "site_coords_proj",
+  "temp_df", "df_thickness", "df_surface", "elevation_temp", "model_data"
+)
+for (obj in important_objects) {
+  path <- paste0(obj, ".rds")
+  if (file.exists(path)) {
+    assign(obj, readRDS(path), envir = .GlobalEnv)
+    message(paste("Loaded:", obj))
+  } else {
+    warning(paste("File not found:", path))
+  }
+}
+```
+
+
+
+```{r Data Cleaning, echo=FALSE}
+################################################################################################
+############################# Cleaning meteorite_sites dataframe ###############################
+################################################################################################
+dms_to_decimal <- function(dms_str) {
+  direction <- str_extract(dms_str, "[NSEW]")
+  nums <- str_extract_all(dms_str, "\\d+")[[1]]
+  if (length(nums) < 2) return(NA_real_)
+  deg <- as.numeric(nums[1])
+  min <- as.numeric(nums[2])
+  dec <- deg + min / 60
+  # Apply direction
+  if (direction %in% c("S", "W")) dec <- -dec
+  return(dec)
+}
+meteorite_sites <- meteorite_sites %>%
+  mutate(
+    latitude = sapply(lat_dms, dms_to_decimal),
+    longitude = sapply(lon_dms, dms_to_decimal)
+  )
+meteorite_sites_sf <- st_as_sf(meteorite_sites, coords = c("longitude", "latitude"), crs = 4326)
+meteorite_sites_proj <- st_transform(meteorite_sites_sf, crs = 3031)
+################################################################################################
+################################### Create Antarctic Dataset ###################################
+################################################################################################
+merged_meteor_data <- read.csv("MergedMeteorData.csv")
+antarctic_meteor_data <- merged_meteor_data %>%
+  filter(Continent == "Antarctica")
+################################################################################################
+########################### Add "site" column using "site_names" Data ##########################
+################################################################################################
+antarctic_meteor_data <- antarctic_meteor_data %>%
+  mutate(site = NA_character_)
+antarctic_meteor_data <- antarctic_meteor_data %>%
+  rowwise() %>%
+  mutate(site = {
+    match <- site_names[str_detect(name, fixed(site_names, ignore_case = TRUE))]
+    if (length(match) > 0) match[1] else site
+  }) %>%
+  ungroup()
+################################################################################################
+######################## Remove "Adelie Land" (Location Data Too Vague) ########################
+################################################################################################
+antarctic_meteor_data <- antarctic_meteor_data %>%
+  filter(site != "Adelie Land") 
+################################################################################################
+########################## Add site locations using "meteorite_sites" ##########################
+################################################################################################
+antarctic_meteor_data <- antarctic_meteor_data %>%
+  left_join(meteorite_sites %>% dplyr::select(name, latitude, longitude),
+            by = c("site" = "name")) %>%
+  rename(site_lat = latitude, site_long = longitude)
+################################################################################################
+###### Add missing site locations using "site" column & the average avaliable coordinates ######
+################################################################################################
+site_coords_avg <- antarctic_meteor_data %>%
+  group_by(site) %>%
+  summarise(
+    avg_lat = mean(reclat, na.rm = TRUE),
+    avg_long = mean(reclong, na.rm = TRUE)
+  ) %>%
+  mutate(
+    avg_lat = ifelse(is.nan(avg_lat), NA, avg_lat),
+    avg_long = ifelse(is.nan(avg_long), NA, avg_long)
+  )
+site_coords_avg <- site_coords_avg %>%
+  mutate(
+    avg_lat = ifelse(site %in% names(manual_lat), manual_lat[site], avg_lat),
+    avg_long = ifelse(site %in% names(manual_long), manual_long[site], avg_long)
+  )
+antarctic_meteor_data <- antarctic_meteor_data %>%
+  left_join(site_coords_avg %>% 
+              dplyr::select(site, avg_lat = avg_lat, avg_long = avg_long),
+            by = "site")
+################################################################################################
+######## Add "exact_coords" flag for coordinates which are not the result of an average ########
+################################################################################################
+antarctic_meteor_data <- antarctic_meteor_data %>%
+  mutate(exact_coords = !is.na(reclat) & !is.na(reclong))
+################################################################################################
+### Add new column for best avaliable coordinates (as they may differ from site coordinates) ###
+################################################################################################
+antarctic_meteor_data <- antarctic_meteor_data %>%
+  mutate(
+    bestlat = reclat,
+    bestlong = reclong
+  )
+antarctic_meteor_data <- antarctic_meteor_data %>%
+  mutate(
+    bestlat = ifelse(is.na(bestlat), avg_lat, bestlat),
+    bestlong = ifelse(is.na(bestlong), avg_long, bestlong)
+  ) 
+################################################################################################
+########## Create data for observations with true location data (not an approximation) #########
+################################################################################################
+exact_sites <- antarctic_meteor_data %>%
+  filter(exact_coords == TRUE) %>%
+  dplyr::distinct(bestlat, bestlong, .keep_all = TRUE) %>%
+  st_as_sf(coords = c("bestlong", "bestlat"), crs = 4326) %>%
+  st_transform(crs = 3031)
+################################################################################################
+################################ Count observations at each site ###############################
+################################################################################################
+site_meteor_counts <- antarctic_meteor_data %>%
+  group_by(site) %>%
+  summarise(meteor_count = n(), .groups = "drop")
+################################################################################################
+###### Add flag for "exact_site" and average site coordinates for sites with no location #######
+################################################################################################
+antarctic_meteor_data <- antarctic_meteor_data %>%
+  mutate(
+    exact_site = !is.na(site_lat) & !is.na(site_long)
+  )
+best_coords_avg <- antarctic_meteor_data %>%
+  group_by(site) %>%
+  summarise(
+    avg_bestlat = mean(bestlat, na.rm = TRUE),
+    avg_bestlong = mean(bestlong, na.rm = TRUE),
+    .groups = "drop"
+  )
+antarctic_meteor_data <- antarctic_meteor_data %>%
+  left_join(best_coords_avg, by = "site") %>%
+  mutate(
+    site_lat = if_else(is.na(site_lat), avg_bestlat, site_lat),
+    site_long = if_else(is.na(site_long), avg_bestlong, site_long)
+  ) %>%
+  dplyr::select(-avg_bestlat, -avg_bestlong) 
+antarctic_meteor_data <- antarctic_meteor_data %>%
+  mutate(
+    bestlat = if_else(is.na(bestlat), site_lat, bestlat),
+    bestlong = if_else(is.na(bestlong), site_long, bestlong)
+  )
+################################################################################################
+###################################### Final Cleaned Data ######################################
+################################################################################################
+antarctic_meteor_data <- antarctic_meteor_data %>%
+  dplyr::select(-c(avg_lat, avg_long, reclong, reclat, Continent, GeoLocation, fall, nametype, id, recclass))
+meteor_sf <- st_as_sf(antarctic_meteor_data, coords = c("bestlong", "bestlat"), crs = 4326) %>%
+  st_transform(crs = 3031)
+################################################################################################
+######### Subset data to create a "site_coordinates" dataframe, and create projection ##########
+################################################################################################
+site_coordinates <- antarctic_meteor_data %>%
+  group_by(site) %>%
+  summarise(
+    site_lat = mean(site_lat, na.rm = TRUE),
+    site_long = mean(site_long, na.rm = TRUE),
+    any_exact = any(exact_site, na.rm = TRUE)
+  ) %>%
+  mutate(
+    site_lat = ifelse(is.nan(site_lat), NA, site_lat),
+    site_long = ifelse(is.nan(site_long), NA, site_long),
+    exact_site = any_exact
+  ) %>%
+  dplyr::select(-any_exact)
+site_coords_with_counts <- site_coordinates %>%
+  left_join(site_meteor_counts, by = "site") %>%
+  filter(!is.na(site_lat) & !is.na(site_long))
+site_coords_sf <- site_coords_with_counts %>%
+  filter(!is.na(site_lat) & !is.na(site_long)) %>%
+  st_as_sf(coords = c("site_long", "site_lat"), crs = 4326)
+site_coords_proj <- st_transform(site_coords_sf, crs = 3031)
+################################################################################################
+############################## Load and transform Antarctica Map ###############################
+################################################################################################
+antarctica <- ne_countries(scale = "medium", continent = "Antarctica", returnclass = "sf")
+antarctica_proj <- st_transform(antarctica, crs = 3031)
+################################################################################################
+############################### Load and transform blue ice map ################################
+################################################################################################
+blue_ice <- st_read("BlueIceAreas.shp")
+blue_ice_proj <- st_transform(blue_ice, crs = 3031)
+################################################################################################
+################### Load ice flow data and standardize coordinate projection ###################
+################################################################################################
+ga_flow <- qa_dataset("MEaSUREs Ice flow speed (450m)")
+ice_flow <- qa_get(ga_flow, verbose = TRUE)
+ga_velocity <- qa_dataset("MEaSUREs_Flow vectors (Sc.dep.)")
+ice_velocity <- qa_get(ga_velocity, verbose = TRUE)
+proj_ice <- terra::crs(ice_flow)
+proj_mets <- sf::st_crs(exact_sites)
+if (proj_ice != proj_mets) {
+  exact_sites <- sf::st_transform(exact_sites, proj_ice)
+}
+exact_sites$ice_velocity <- raster::extract(ice_flow, exact_sites)
+hist_data <- hist(exact_sites$ice_velocity, breaks = 50, plot = FALSE)
+
+################################################################################################
+########################## Format data for speed magnitude plot ################################
+################################################################################################
+ice_velocity_sf <- st_as_sf(ice_velocity)
+st_crs(ice_velocity_sf) <- 3031
+ice_velocity_sf <- ice_velocity_sf %>%
+  mutate(speed = sqrt(vx^2 + vy^2))
+ice_velocity_sf <- ice_velocity_sf %>% filter(!is.na(speed))
+################################################################################################
+######################### Load and transform surface mass balance data #########################
+################################################################################################
+ga_smb <- qa_dataset("RACMO Surface mass balance (35km)")
+smb <- qa_get(ga_smb, verbose = TRUE)
+smb_proj <- projectRaster(smb, crs = crs(sf::st_crs(3031)$wkt))
+smb_points <- rasterToPoints(smb_proj, spatial = TRUE)
+smb_sf <- st_as_sf(smb_points)
+smb_sf <- smb_sf %>%
+  rename(SmB = 1)
+smb_sf <- smb_sf %>%
+  filter(!is.na(SmB)) %>%
+  filter(SmB != 0)
+smb_sf$SmB <- as.numeric(smb_sf$SmB)
+################################################################################################
+####### Transform ice flow data to raster format and calculate divergence and stagnation #######
+################################################################################################
+ice_velocity_df <- ice_velocity_sf %>%
+  mutate(x = st_coordinates(.)[,1],
+         y = st_coordinates(.)[,2]) %>%
+  st_drop_geometry() 
+vx_raster <- rasterFromXYZ(ice_velocity_df[, c("x", "y", "vx")])
+vy_raster <- rasterFromXYZ(ice_velocity_df[, c("x", "y", "vy")])
+crs(vx_raster) <- 3031
+crs(vy_raster) <- 3031
+vx_gradient <- terrain(vx_raster, opt = "slope")
+vy_gradient <- terrain(vy_raster, opt = "slope")
+dx_kernel <- matrix(c(-1, 0, 1,
+                      -2, 0, 2,
+                      -1, 0, 1), 
+                    nrow = 3, byrow = TRUE) / 8
+dy_kernel <- matrix(c(-1, -2, -1,
+                       0,  0,  0,
+                       1,  2,  1), 
+                    nrow = 3, byrow = TRUE) / 8
+dvx_dx <- focal(vx_raster, w = dx_kernel, pad = TRUE, padValue = NA)
+dvy_dy <- focal(vx_raster, w = dy_kernel, pad = TRUE, padValue = NA)
+divergence <- dvx_dx + dvy_dy
+speed <- sqrt(vx_raster^2 + vy_raster^2)
+threshold_speed <- quantile(values(speed), 0.05, na.rm = TRUE)
+threshold_divergence <- sd(values(divergence), na.rm = TRUE) * 0.5 
+stagnation_mask <- (speed < threshold_speed) & (abs(divergence) < threshold_divergence)
+speed_df <- as.data.frame(speed, xy = TRUE, na.rm = TRUE)
+div_df <- as.data.frame(divergence, xy = TRUE, na.rm = TRUE)
+stag_df <- as.data.frame(stagnation_mask, xy = TRUE, na.rm = TRUE)
+speed_sf <- st_as_sf(speed_df, coords = c("x", "y"), crs = 3031)
+div_sf <- st_as_sf(div_df, coords = c("x", "y"), crs = 3031)
+stag_sf <- st_as_sf(stag_df, coords = c("x", "y"), crs = 3031)
+stag_sf <- stag_sf %>%
+  mutate(stagnant = ifelse(layer == TRUE, 1, 0))
+grid_resolution <- 35000 
+bbox <- st_bbox(stag_sf)
+x_seq <- seq(bbox["xmin"], bbox["xmax"], by = grid_resolution)
+y_seq <- seq(bbox["ymin"], bbox["ymax"], by = grid_resolution)
+grid <- st_make_grid(stag_sf, cellsize = c(grid_resolution, grid_resolution), what = "polygons")
+grid_sf <- st_as_sf(grid)
+stag_sf_with_grid <- st_join(stag_sf, grid_sf, join = st_within)
+avg_stag_sf <- stag_sf_with_grid %>%
+  group_by(geometry) %>%
+  summarise(
+    stagnant_avg = mean(stagnant, na.rm = TRUE),
+    .groups = "drop"
+  )
+div_sf <- div_sf %>%
+  mutate(divergence = as.numeric(layer))
+speed_sf <- speed_sf %>%
+  mutate(speed = as.numeric(layer))
+div_sf_with_grid <- st_join(div_sf, grid_sf, join = st_within)
+avg_div_sf <- div_sf_with_grid %>%
+  group_by(geometry) %>%
+  summarise(
+    divergence_avg = mean(divergence, na.rm = TRUE),
+    .groups = "drop"
+  )
+speed_sf_with_grid <- st_join(speed_sf, grid_sf, join = st_within)
+avg_speed_sf <- speed_sf_with_grid %>%
+  group_by(geometry) %>%
+  summarise(
+    speed_avg = mean(speed, na.rm = TRUE),
+    .groups = "drop"
+  )
+################################################################################################
+############################# Load and transform temperature data ##############################
+################################################################################################
+ga_temp <- qa_dataset("RACMO Average 2m temperature (35km)") ## the dataset info
+temp <- qa_get(ga_temp, verbose = TRUE) ## fetch the actual data
+temp_proj <- projectRaster(temp, crs = CRS("+init=EPSG:3031"), method = "bilinear")
+temp_df <- as.data.frame(temp_proj, xy = TRUE, na.rm = TRUE)
+colnames(temp_df) <- c("x", "y", "temperature")
+antarctica_proj <- st_transform(antarctica_proj, crs = crs(temp))
+antarctica_sp <- as_Spatial(antarctica_proj)
+temp_cropped <- crop(temp, extent(antarctica_sp))
+temp_masked <- mask(temp_cropped, antarctica_sp)
+temp_masked_proj <- projectRaster(temp_masked, crs = crs(temp_proj), method = "ngb")
+mask_df <- as.data.frame(temp_masked_proj, xy = TRUE)
+colnames(mask_df) <- c("x", "y", "masked_temp")
+temp_df_masked <- left_join(temp_df, mask_df, by = c("x", "y"))
+temp_df <- temp_df_masked %>% filter(!is.na(masked_temp))
+################################################################################################
+######################### Load, clean, and transform elevation data ############################
+################################################################################################
+ga_surface_elevation <- qa_dataset("BEDMAP2 Surface elevation (1km)") 
+surface_elevation <- qa_get(ga_surface_elevation, verbose = TRUE) 
+ga_bed_elevation <- qa_dataset("BEDMAP2 Bed elevation (1km)") 
+bed_elevation <- qa_get(ga_bed_elevation, verbose = TRUE) 
+surface_elevation_35km <- aggregate(surface_elevation, fact = 35, fun = mean)
+bed_elevation_35km <- aggregate(bed_elevation, fact = 35, fun = mean)
+df_surface <- as.data.frame(surface_elevation_35km, xy = TRUE, na.rm = TRUE)
+antarctica_sp <- as_Spatial(antarctica_proj)
+bed_cropped <- crop(bed_elevation_35km, extent(antarctica_sp))
+bed_masked <- mask(bed_cropped, antarctica_sp)
+df_bed <- as.data.frame(bed_masked, xy = TRUE, na.rm = TRUE)
+################################################################################################
+############## Calculate ice thickness and merge with temp and elevation data ##################
+################################################################################################
+df_thickness <- merge(df_surface, df_bed, by = c("x", "y"))
+df_thickness$ice_thickness <- df_thickness$bedmap2_surface - df_thickness$bedmap2_bed
+sf_temp <- st_as_sf(temp_df, coords = c("x", "y"), crs = 3031)
+sf_thickness <- st_as_sf(df_thickness, coords = c("x", "y"), crs = 3031)
+nearest_ix <- st_nearest_feature(sf_temp, sf_thickness)
+sf_temp$bedmap2_surface <- sf_thickness$bedmap2_surface[nearest_ix]
+sf_temp$bedmap2_bed <- sf_thickness$bedmap2_bed[nearest_ix]
+sf_temp$ice_thickness <- sf_thickness$ice_thickness[nearest_ix]
+sf_temp$masked_temp <- NULL
+################################################################################################
+############################# Join with multi-polygons data frame ##############################
+################################################################################################
+elevation_temp <- st_transform(elevation_temp, st_crs(meteor_counts))
+joined <- st_join(meteor_counts, elevation_temp, join = st_contains)
+elevation_summary <- joined %>%
+  group_by(poly_id) %>%
+  summarise(
+    mean_temperature = mean(temperature, na.rm = TRUE),
+    mean_surface = mean(bedmap2_surface, na.rm = TRUE),
+    mean_bed = mean(bedmap2_bed, na.rm = TRUE),
+    mean_thickness = mean(ice_thickness, na.rm = TRUE)
+  )
+elevation_summary_df <- elevation_summary %>% st_drop_geometry()
+model_data <- left_join(meteor_counts, elevation_summary_df, by = "poly_id")
+
+
+missing_rows <- model_data %>% filter(is.na(mean_temperature) | is.na(mean_surface) | is.na(mean_bed) | is.na(mean_thickness))
+complete_rows <- model_data %>% filter(!is.na(mean_temperature) & !is.na(mean_surface) & !is.na(mean_bed) & !is.na(mean_thickness))
+centroids_missing <- st_coordinates(st_centroid(st_geometry(missing_rows)))
+centroids_complete <- st_coordinates(st_centroid(st_geometry(complete_rows)))
+knn_result <- get.knnx(centroids_complete, centroids_missing, k = 4)
+complete_rows_df <- complete_rows %>% st_drop_geometry()
+imputed_values <- apply(knn_result$nn.index, 1, function(idxs) {
+  neighbors <- complete_rows_df[idxs, ]
+  colMeans(neighbors[, c("mean_temperature", "mean_surface", "mean_bed", "mean_thickness")], na.rm = TRUE)
+}) %>% 
+  t() %>% 
+  as_tibble()
+imputed_values$poly_id <- missing_rows$poly_id
+model_data <- model_data %>%
+  left_join(imputed_values, by = "poly_id", suffix = c("", "_knn")) %>%
+  mutate(
+    mean_temperature = ifelse(is.na(mean_temperature), mean_temperature_knn, mean_temperature),
+    mean_surface     = ifelse(is.na(mean_surface), mean_surface_knn, mean_surface),
+    mean_bed         = ifelse(is.na(mean_bed), mean_bed_knn, mean_bed),
+    mean_thickness   = ifelse(is.na(mean_thickness), mean_thickness_knn, mean_thickness)
+  ) %>%
+  dplyr::select(-ends_with("_knn"))
+vg_stag_sf <- st_transform(avg_stag_sf, st_crs(meteor_counts))
+avg_div_sf <- st_transform(avg_div_sf, st_crs(meteor_counts))
+
+
+# Perform spatial join with `meteor_counts` (same as in your code for elevation data)
+joined_stag <- st_join(meteor_counts, avg_stag_sf, join = st_contains)
+joined_div <- st_join(meteor_counts, avg_div_sf, join = st_contains)
+
+# Summarize the stagnation and divergence data (average over each polygon)
+stag_summary <- joined_stag %>%
+  group_by(poly_id) %>%
+  summarise(
+    mean_stagnation = mean(stagnant_avg, na.rm = TRUE)
+  )
+
+div_summary <- joined_div %>%
+  group_by(poly_id) %>%
+  summarise(
+    mean_divergence = mean(divergence_avg, na.rm = TRUE)
+  )
+
+# Convert the summary tables to data frames (drop geometry)
+stag_summary_df <- stag_summary %>% st_drop_geometry()
+div_summary_df <- div_summary %>% st_drop_geometry()
+
+# Merge the stagnation and divergence summaries with the existing model_data
+model_data <- model_data %>%
+  left_join(stag_summary_df, by = "poly_id") %>%
+  left_join(div_summary_df, by = "poly_id")
+
+# Handle missing values with KNN (same process as for elevation)
+missing_rows_stag_div <- model_data %>% 
+  filter(is.na(mean_stagnation.x) | is.na(mean_divergence.x))
+
+complete_rows_stag_div <- model_data %>% 
+  filter(!is.na(mean_stagnation.x) & !is.na(mean_divergence.x))
+
+# Get coordinates of centroids for missing and complete rows
+centroids_missing_stag_div <- st_coordinates(st_centroid(st_geometry(missing_rows_stag_div)))
+centroids_complete_stag_div <- st_coordinates(st_centroid(st_geometry(complete_rows_stag_div)))
+
+# Perform KNN imputation for the missing rows
+knn_result_stag_div <- get.knnx(centroids_complete_stag_div, centroids_missing_stag_div, k = 4)
+
+# Drop geometry and calculate the mean for neighbors
+complete_rows_stag_div_df <- complete_rows_stag_div %>% st_drop_geometry()
+imputed_values_stag_div <- apply(knn_result_stag_div$nn.index, 1, function(idxs) {
+  neighbors <- complete_rows_stag_div_df[idxs, ]
+  colMeans(neighbors[, c("mean_stagnation.x", "mean_divergence.x")], na.rm = TRUE)
+}) %>% 
+  t() %>% 
+  as_tibble()
+
+# Add `poly_id` to the imputed values
+imputed_values_stag_div$poly_id <- missing_rows_stag_div$poly_id
+
+# Merge the imputed values into the model data
+imputed_values_stag_div <- imputed_values_stag_div %>%
+  rename(
+    mean_stagnation_imputed = mean_stagnation.x,
+    mean_divergence_imputed = mean_divergence.x
+  )
+
+# Join and replace missing values
+model_data <- model_data %>%
+  left_join(imputed_values_stag_div, by = "poly_id") %>%
+  mutate(
+    mean_stagnation = ifelse(is.na(mean_stagnation.x), mean_stagnation_imputed, mean_stagnation.x),
+    mean_divergence = ifelse(is.na(mean_divergence.x), mean_divergence_imputed, mean_divergence.x)
+  ) %>%
+  dplyr::select(-mean_stagnation_imputed, -mean_divergence_imputed,-mean_divergence.x, -mean_divergence.y, -mean_stagnation.x, -mean_stagnation.y)
+saveRDS(model_data, file = "model_data.rds")
+model_data <- readRDS("model_data.rds")
+
+
+```
+
+```{r Compiling Data for Models, echo = FALSE}
+################################################################################################
+############ Merge stagnation, meteor location, blue ice, and surface mass balance #############
+################################################################################################
+blue_ice_proj <- st_transform(blue_ice_proj, st_crs(smb_sf))
+stagnation_sf <- st_as_sf(stagnation_df, coords = c("x", "y"), crs = 3031)
+stagnation_sf <- st_transform(stagnation_sf, st_crs(smb_sf))
+meteor_sf <- st_as_sf(antarctic_meteor_data, coords = c("bestlong", "bestlat"), crs = 4326)
+meteor_sf <- st_transform(meteor_sf, st_crs(smb_sf))
+################################################################################################
+#################### Average velocity and SMB values over blue ice polygons ####################
+################################################################################################
+meteor_sf <- st_as_sf(antarctic_meteor_data, coords = c("bestlong", "bestlat"), crs = 4326)
+meteor_sf <- st_transform(meteor_sf, st_crs(blue_ice_proj))
+template <- raster(extent(ice_velocity_sf), res = 500, crs = crs(blue_ice_proj))
+ice_velocity_raster <- rasterize(ice_velocity_sf, template, field = "speed", fun = mean)
+smb_raster <- rasterize(smb_sf, template, field = "SmB", fun = mean)
+blue_ice_proj$poly_id <- 1:nrow(blue_ice_proj)
+meteor_join <- st_join(blue_ice_proj, meteor_sf, join = st_contains)
+meteor_counts <- meteor_join %>%
+  group_by(poly_id, area_km2, geometry) %>%
+  summarise(n_meteors = n(), .groups = "drop")
+summary_function <- function(values, coverage_fractions, na.rm = TRUE) {
+  valid_values <- values[!is.na(values)]
+  if (length(valid_values) == 0) {
+    return(NA) 
+  } else {
+    return(mean(valid_values, na.rm = na.rm))
+  }
+}
+meteor_counts$mean_velocity <- exact_extract(ice_velocity_raster, meteor_counts, fun = summary_function, na.rm = TRUE)
+meteor_counts$mean_smb <- exact_extract(smb_raster, meteor_counts, fun = summary_function, na.rm = TRUE)
+################################################################################################
+############## Use KNN interpolation to fill NA values for mean velocity and SMB ###############
+################################################################################################
+known_idx_vel <- which(!is.na(meteor_counts$mean_velocity))
+unknown_idx_vel <- which(is.na(meteor_counts$mean_velocity))
+k <- 4
+coords <- st_coordinates(st_centroid(meteor_counts))
+knn_result_vel <- knn.reg(
+  train = coords[known_idx_vel, ],
+  test = coords[unknown_idx_vel, ],
+  y = meteor_counts$mean_velocity[known_idx_vel],
+  k = k
+)$pred
+meteor_counts$mean_velocity[unknown_idx_vel] <- knn_result_vel
+meteor_counts$velocity_knn <- FALSE
+meteor_counts$velocity_knn[unknown_idx_vel] <- TRUE
+known_idx_smb <- which(!is.na(meteor_counts$mean_smb))
+unknown_idx_smb <- which(is.na(meteor_counts$mean_smb))
+knn_result_smb <- knn.reg(
+  train = coords[known_idx_smb, ],
+  test = coords[unknown_idx_smb, ],
+  y = meteor_counts$mean_smb[known_idx_smb],
+  k = k
+)$pred
+meteor_counts$mean_smb[unknown_idx_smb] <- knn_result_smb
+meteor_counts$smb_knn <- FALSE
+meteor_counts$smb_knn[unknown_idx_smb] <- TRUE
+meteor_counts$uses_knn <- meteor_counts$velocity_knn | meteor_counts$smb_knn
+meteor_polygons <- meteor_counts
+```
+
+
+
+```{r Global Map, echo = FALSE}
+clean_meteor_data <- merged_meteor_data %>%
+  filter(!is.na(reclong), !is.na(reclat))
+meteor_sf <- st_as_sf(clean_meteor_data, coords = c("reclong", "reclat"), crs = 4326)
+world <- ne_countries(scale = "medium", returnclass = "sf")
+robin_proj <- "+proj=robin +datum=WGS84"
+world_proj <- st_transform(world, crs = robin_proj)
+meteor_proj <- st_transform(meteor_sf, crs = robin_proj)
+
+ggplot() +
+  geom_sf(data = world_proj, fill = "gray95", color = "gray60", size = 0.3) +
+  geom_sf(data = meteor_proj, color = "red", size = 0.5, alpha = 0.7) +
+  theme_minimal() +
+  labs(title = "Meteorite Location Data",
+       subtitle = "Using Meteorite Landings Dataset",
+       caption = "Data: NASA Meteorite Landings") +
+  theme(
+    plot.title = element_text(size = 16, face = "bold", hjust = 0.5),
+    plot.subtitle = element_text(size = 12, hjust = 0.5),
+    plot.caption = element_text(size = 8, hjust = 0.5)
+    )
+
+```
+
+```{r SiteMap, echo=FALSE}
+ggplot() +
+  geom_sf(data = antarctica_proj, fill = "white", color = "gray60") +
+  geom_sf(data = mask_sf, fill = "white", color = "white") +
+  geom_sf(data = site_coords_proj, color = "red", size = 1.5) +
+  coord_sf(crs = st_crs(3031)) +
+  theme_minimal() +
+  labs(title = "Antarctic Meteorite Sites",
+       subtitle = "Approximate Locations of Known Collection Regions",
+       caption = "Data: Quantarctica • Projection: EPSG 3031") +
+  theme(
+    plot.title = element_text(size = 16, face = "bold", hjust = 0.5),
+    plot.subtitle = element_text(size = 12, hjust = 0.5),
+    plot.caption = element_text(size = 8, hjust = 0.5)
+  )
+```
+
+```{r BlueIce, echo=FALSE}
+ggplot() +
+  geom_sf(data = antarctica_proj, fill = "white", color = "gray60") +
+  geom_sf(data = mask_sf, fill = "white", color = "white") +
+  geom_sf(data = blue_ice_proj, fill = "blue", alpha = 1, color = NA) +
+  coord_sf(crs = st_crs(3031)) +
+  theme_minimal() +  
+  labs(
+    title = "Blue Ice Areas in Antarctica",
+    caption = "Data: Quantarctica • Projection: EPSG 3031"
+  ) +
+  theme(
+    plot.title = element_text(size = 16, face = "bold", hjust = 0.5),
+    plot.caption = element_text(size = 8, hjust = 0.5)
+  )
+```
+
+```{r Ice Velocity, echo = FALSE}
+plot(
+  hist_data$mids, hist_data$counts,
+  type = "l", 
+  main = "Ice Velocity at Meteorite Sites",
+  xlab = "Velocity (m/year)",
+  ylab = "Frequency",
+  xlim = c(0, 80),
+  col = "blue",
+  lwd = 3
+) + 
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 18, face = "bold", hjust = 0.5),
+    axis.title.x = element_text(size = 14, face = "bold"),
+    axis.title.y = element_text(size = 14, face = "bold", vjust = 0.5),
+    axis.text.x = element_text(size = 10, face = "bold"),
+    axis.text.y = element_text(size = 10, face = "bold"),
+    panel.border = element_rect(color = "black", fill = NA, linewidth = 1)
+  )
+
+
+site_coords_proj <- site_coords_proj %>%
+  mutate(site_type = 1)
+
+ggplot() +
+  geom_sf(data = antarctica_proj, fill = "white", color = "gray60") +
+  geom_sf(data = mask_sf, fill = "white", color = "white") +
+  geom_sf(data = ice_velocity_sf, aes(color = speed)) +
+  scale_color_gradient(name = "Speed (m/yr)", na.value = "white") +
+  geom_sf(data = site_coords_proj, color = "red", size = 1) +
+  coord_sf(crs = 3031) +  
+  theme_minimal() +
+  labs(title = "Antarctic Ice Velocity Heatmap",
+       subtitle = "With Meteor Recovery Sites",
+       caption = "Data: NASA (MEaSUREs) • Projection: EPSG 3031") +
+  theme(
+    plot.title = element_text(size = 18, face = "bold", hjust = 0.5),
+    plot.subtitle = element_text(size = 14, hjust = 0.5),
+    plot.caption = element_text(size = 8, hjust = 0.5))
+```
+
+```{r Ice Velocity Stagnation, echo = FALSE}
+ggplot() +
+  geom_sf(data = antarctica_proj, fill = "white", color = "gray60") +
+  geom_sf(data = mask_sf, fill = "white", color = "white") +
+  geom_sf(data = blue_ice_proj, fill = "blue", alpha = 1, color = NA) +
+  geom_point(data = stagnation_df, aes(x = x, y = y), color = "forestgreen", size = 1, alpha = 1) +
+  coord_sf(crs = 3031) +
+  labs(title = "Stagnation Zones in Antarctic Ice Flow") +
+  theme_minimal() +
+  labs(
+    title = "Stagnation Zones in Antarctica",
+    subtitle = "With Blue Ice Regions",
+    caption = "Data: NASA (MEaSUREs) • Projection: EPSG 3031"
+  ) +
+  theme(
+    plot.title = element_text(size = 16, face = "bold", hjust = 0.5),
+    plot.subtitle = element_text(size = 12, hjust = 0.5),
+    plot.caption = element_text(size = 8, hjust = 0.5),
+    axis.title.x = element_text(size = 0),
+    axis.title.y = element_text(size = 0)
+  )
+
+```
+
+```{r Elevation and Ice Thickness Plots, echo = FALSE}
+sf_thickness <- st_as_sf(df_thickness, coords = c("x", "y"), crs = 3031)
+sf_surface <- st_as_sf(df_surface, coords = c("x", "y"), crs = 3031)
+
+ggplot() +
+  geom_sf(data = antarctica_proj, fill = "white", color = "gray60") +
+  geom_sf(data = mask_sf, fill = "white", color = "white") +
+  geom_sf(data = sf_thickness, aes(color = ice_thickness), size = 1) +
+  scale_color_viridis(name = "Ice Thickness (m)", option = "C") +
+  coord_sf(crs = st_crs(3031)) +
+  theme_minimal() +
+  labs(
+    title = "Estimated Ice Thickness",
+    subtitle = "35km Resolution",
+    caption = "Data: British Antarctic Survey • Projection: EPSG 3031"
+  ) +
+  theme(
+    plot.title = element_text(size = 16, face = "bold", hjust = 0.5),
+    plot.subtitle = element_text(size = 12, hjust = 0.5),
+    plot.caption = element_text(size = 8, hjust = 0.5)
+  )
+ggplot() +
+  geom_sf(data = antarctica_proj, fill = "white", color = "gray60") +
+  geom_sf(data = mask_sf, fill = "white", color = "white") +
+  geom_sf(data = sf_surface, aes(color = bedmap2_surface), size = 1) +
+  scale_color_viridis(name = "Surface Elevation (m)", option = "C") +
+  coord_sf(crs = st_crs(3031)) +
+  theme_minimal() +
+  labs(
+    title = "Surface Elevation",
+    subtitle = "35km Resolution",
+    caption = "Data: British Antarctic Survey • Projection: EPSG 3031"
+  ) +
+  theme(
+    plot.title = element_text(size = 16, face = "bold", hjust = 0.5),
+    plot.subtitle = element_text(size = 12, hjust = 0.5),
+    plot.caption = element_text(size = 8, hjust = 0.5)
+  )
+
+# Data cleaning section must be executed to call avg_stag_sf, avg_div_sf, and avg_speed_sf
+ggplot() +
+  geom_sf(data = antarctica_proj, fill = "white", color = "gray60") +
+  geom_sf(data = mask_sf, fill = "white", color = "white") +
+  geom_sf(data = avg_stag_sf, aes(color = stagnant_avg), size = 1) +
+  scale_color_viridis_c(name = "Average Stagnation", option = "C") +
+  coord_sf(crs = st_crs(3031)) +
+  theme_minimal() +
+  labs(
+    title = "Stagnation",
+    subtitle = "35km Resolution",
+    caption = "Data: MEaSUREs (NASA) • Projection: EPSG 3031"
+  ) +
+  theme(
+    plot.title = element_text(size = 16, face = "bold", hjust = 0.5),
+    plot.subtitle = element_text(size = 12, hjust = 0.5),
+    plot.caption = element_text(size = 8, hjust = 0.5)
+  )
+
+ggplot() +
+  geom_sf(data = antarctica_proj, fill = "white", color = "gray60") +
+  geom_sf(data = mask_sf, fill = "white", color = "white") +
+  geom_sf(data = avg_div_sf, aes(color = divergence_avg), size = 1) +
+  scale_color_viridis_c(name = "Average Divergence", option = "C") +
+  coord_sf(crs = st_crs(3031)) +
+  theme_minimal() +
+  labs(
+    title = "Divergence",
+    subtitle = "35km Resolution",
+    caption = "Data: MEaSUREs (NASA) • Projection: EPSG 3031"
+  ) +
+  theme(
+    plot.title = element_text(size = 16, face = "bold", hjust = 0.5),
+    plot.subtitle = element_text(size = 12, hjust = 0.5),
+    plot.caption = element_text(size = 8, hjust = 0.5)
+  )
+ggplot() +
+  geom_sf(data = antarctica_proj, fill = "white", color = "gray60") +
+  geom_sf(data = mask_sf, fill = "white", color = "white") +
+  geom_sf(data = avg_speed_sf, aes(color = speed_avg), size = 1) +
+  scale_color_viridis_c(name = "Average Speed", option = "C") +
+  coord_sf(crs = st_crs(3031)) +
+  theme_minimal() +
+  labs(
+    title = "Average Ice Speed",
+    subtitle = "35km Resolution",
+    caption = "MEaSUREs (NASA) • Projection: EPSG 3031"
+  ) +
+  theme(
+    plot.title = element_text(size = 16, face = "bold", hjust = 0.5),
+    plot.subtitle = element_text(size = 12, hjust = 0.5),
+    plot.caption = element_text(size = 8, hjust = 0.5)
+  )
+```
+
+```{r Surface Mass Balance, echo = FALSE}
+smallest_150 <- smb_sf %>%
+  arrange(SmB) %>%
+  head(150)
+ggplot() +
+  geom_sf(data = antarctica_proj, fill = "white", color = "gray60") +
+  geom_sf(data = smb_sf, aes(color = SmB)) +
+  scale_color_gradient(low = "blue", high = "red", name = "SMB (m/yr)") +
+  geom_sf(data = smallest_150, aes(color = SmB), shape = 16, size = 1, color = "green") +
+  coord_sf(crs = 3031) +
+  theme_minimal() +
+  labs(
+    title = "Surface Mass Balance (SMB) from RACMO",
+    subtitle = "With Smallest 150 SMB Points",
+    caption = "Data: RACMO • Projection: EPSG 3031"
+  ) +
+  theme(
+    legend.position = "right",
+    plot.title = element_text(size = 16, face = "bold", hjust = 0.5),
+    plot.subtitle = element_text(size = 12, hjust = 0.5),
+    plot.caption = element_text(size = 8, hjust = 0.5),
+    axis.title.x = element_text(size = 0),
+    axis.title.y = element_text(size = 0)
+    )
+```
+
+
+```{r DBSCAN Clustering, echo = FALSE}
+meteor_polygons <- model_data
+centroids <- st_centroid(meteor_polygons)
+coords <- st_coordinates(centroids)
+db <- dbscan(coords, eps = 15000, minPts = 2)
+meteor_polygons$cluster_id <- db$cluster
+model_data$cluster_id <- db$cluster
+cluster_summary <- meteor_polygons %>%
+  st_drop_geometry() %>%
+  group_by(cluster_id) %>%
+  summarise(
+    total_meteors      = sum(n_meteors, na.rm = TRUE),
+    total_area_km2     = sum(area_km2, na.rm = TRUE),
+    avg_velocity       = mean(mean_velocity, na.rm = TRUE),
+    avg_smb            = mean(mean_smb, na.rm = TRUE)
+  ) %>%
+  arrange(desc(total_meteors))
+```
+
+```{r Largest Clusters Plot, echo = TRUE}
+top_clusters <- cluster_summary %>%
+  filter(cluster_id != 0) %>%
+  arrange(desc(total_area_km2)) %>%
+  slice_head(n = 6)
+top_cluster_ids <- top_clusters$cluster_id
+top_cluster_polygons <- meteor_polygons %>%
+  filter(cluster_id %in% top_cluster_ids)
+top_cluster_centroids <- st_centroid(top_cluster_polygons)
+top_cluster_centroids <- st_transform(top_cluster_centroids, crs = 3031)
+top_cluster_centroids <- top_cluster_centroids %>%
+  left_join(top_clusters, by = "cluster_id")
+top_cluster_polygons <- meteor_polygons %>%
+  filter(cluster_id %in% top_cluster_ids)
+ggplot() +
+  geom_sf(data = antarctica_proj, fill = "white", color = "gray60") +
+  geom_sf(data = mask_sf, fill = "white", color = "white") +
+  geom_sf(data = blue_ice_proj, fill = "darkblue", alpha = 1, color = NA) +
+  geom_sf(data = top_cluster_polygons,
+          aes(fill = as.factor(cluster_id), alpha = 1,  color = as.factor(cluster_id))) +
+  coord_sf(crs = 3031) +
+  labs(
+    title = "Largest Clusters by Total Area",
+    subtitle = "With Blue Ice Regions",
+    caption = "Data: Quantarctica • Projection: EPSG 3031"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 16, face = "bold", hjust = 0.5),
+    plot.subtitle = element_text(size = 12, hjust = 0.5),
+    plot.caption = element_text(size = 8, hjust = 0.5),
+    axis.title.x = element_text(size = 0),
+    axis.title.y = element_text(size = 0),
+    legend.position = "none")
+```
+
+```{r DBSCAN Epsilon Visualized, echo = TRUE}
+points <- st_sfc(
+  st_point(c(300000, 0)), 
+  st_point(c(500000, 0)),
+  st_point(c(700000, 0))
+, crs = 3031)
+
+buffers <- st_sf(
+  geometry = c(
+    st_buffer(points[1], dist = 10000),   # 10 km
+    st_buffer(points[2], dist = 30000),   # 30 km
+    st_buffer(points[3], dist = 60000)    # 60 km
+  ),
+  radius_km = c(10, 30, 60)
+)
+
+# Plot
+ggplot() +
+  geom_sf(data = antarctica_proj, fill = "white", color = "gray60") +
+  geom_sf(data = mask_sf, fill = "white", color = "white") +
+  geom_sf(data = blue_ice_proj, fill = "blue", alpha = 1, color = NA) +
+  geom_sf(data = buffers, color = "red", alpha = .3) +
+  coord_sf(crs = st_crs(3031)) +
+  theme_minimal() +
+  labs(title = "DBSCAN Search with Epsilon at 10000, 30000, and 60000")
+```
+
+```{r Number of DBSCAN Clusters vs Epsilon, echo = TRUE}
+eps_values <- seq(2000, 50000, by = 4000)
+cluster_counts <- data.frame()
+for (eps in eps_values) {
+  db <- dbscan(coords, eps = eps, minPts = 2)
+  n_clusters <- length(unique(db$cluster[db$cluster != 0])) 
+  n_noise <- sum(db$cluster == 0)
+  
+  cluster_counts <- rbind(cluster_counts, data.frame(
+    eps = eps,
+    n_clusters = n_clusters,
+    n_noise = n_noise
+  ))
+}
+ggplot(cluster_counts, aes(x = eps, y = n_clusters)) +
+  geom_line(color = "blue", linewidth = 1.5) +
+  labs(
+    title = "Number of DBSCAN Clusters vs Epsilon",
+    x = "Epsilon (meters)",
+    y = "Number of Clusters"
+  ) +
+  coord_cartesian(xlim = c(5000, 45000), ylim = c(0,3500)) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 18, face = "bold", hjust = 0.5),
+    axis.title.x = element_text(size = 12, face = "bold"),
+    axis.title.y = element_text(size = 16, face = "bold", vjust = 0.5, margin = ggplot2::margin(r = 10)),
+    axis.text.x = element_text(size = 10, face = "bold"),
+    axis.text.y = element_text(size = 10, face = "bold"),
+    panel.border = element_rect(color = "black", fill = NA, linewidth = 1)
+  )
+
+
+```
+
+```{r Simple Models, echo = FALSE}
+# ---- Linear Regression ----
+lm_model <- lm(total_meteors ~ total_area_km2 + avg_velocity + avg_smb,
+               data = cluster_summary)
+lm_pred <- predict(lm_model)
+lm_r2 <- summary(lm_model)$r.squared
+lm_adj_r2 <- summary(lm_model)$adj.r.squared
+# ---- Neural Network with Scaling ----
+scaled_data <- cluster_summary %>%
+  mutate(
+    total_area_km2_scaled = scale(total_area_km2),
+    avg_velocity_scaled    = scale(avg_velocity),
+    avg_smb_scaled         = scale(avg_smb),
+    total_meteors_scaled    = scale(total_meteors)
+  )
+
+nn_model <- nnet(
+  total_meteors_scaled ~ total_area_km2_scaled + avg_velocity_scaled + avg_smb_scaled,
+  data = scaled_data,
+  size = 4,
+  linout = TRUE,
+  trace = FALSE
+)
+
+nn_pred_scaled <- predict(nn_model)
+nn_pred <- as.vector(nn_pred_scaled * attr(scaled_data$total_meteors_scaled, "scaled:scale") +
+                       attr(scaled_data$total_meteors_scaled, "scaled:center"))
+nn_r2 <- cor(scaled_data$total_meteors, nn_pred)^2
+nn_adj_r2 <- 1 - (1 - nn_r2) * (nrow(scaled_data) - 1) / (nrow(scaled_data) - 3 - 1)
+summary(nn_model)
+# ---- Random Forest ----
+rf_model <- randomForest(
+  total_meteors ~ total_area_km2 + avg_velocity + avg_smb,
+  data = cluster_summary, ntree = 500
+)
+rf_pred <- predict(rf_model)
+rf_r2 <- cor(cluster_summary$total_meteors, rf_pred)^2
+rf_adj_r2 <- 1 - (1 - rf_r2) * (nrow(cluster_summary) - 1) / (nrow(cluster_summary) - 3 - 1)
+
+# ---- SVM ----
+svm_model <- svm(
+  total_meteors ~ total_area_km2 + avg_velocity + avg_smb,
+  data = cluster_summary, 
+  type = "eps-regression", 
+  kernel = "radial"
+)
+svm_pred <- predict(svm_model)
+svm_r2 <- cor(cluster_summary$total_meteors, svm_pred)^2
+svm_adj_r2 <- 1 - (1 - svm_r2) * (nrow(cluster_summary) - 1) / (nrow(cluster_summary) - 3 - 1)
+
+# ---- Visualization ----
+make_plot <- function(df, actual, predicted, title, color, adj_r2) {
+  ggplot(df, aes(x = {{actual}}, y = {{predicted}})) +
+    geom_point(color = color, alpha = 0.6) +
+    geom_abline(slope = 1, intercept = 0, color = "red") +
+    coord_cartesian(xlim = c(0,2000), ylim = c(0,2000)) +
+    labs(title = title,
+         subtitle = paste0("Adjusted R² = ", round(adj_r2, 2))) +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(hjust = 0.5),
+      plot.subtitle = element_text(hjust = 0.5),
+      axis.title.x = element_blank(),
+      axis.title.y = element_blank()
+    )
+}
+p1 <- make_plot(cluster_summary, total_meteors, lm_pred, "Linear Regression", "orange", lm_adj_r2)
+p2 <- make_plot(scaled_data, total_meteors, nn_pred, "Neural Net", "blue", nn_adj_r2)
+p3 <- make_plot(cluster_summary, total_meteors, rf_pred, "Random Forest", "forestgreen", rf_adj_r2)
+p4 <- make_plot(cluster_summary, total_meteors, svm_pred, "Support Vector Machines", "purple", svm_adj_r2)
+
+x_grob <- textGrob("Actual Meteor Count", gp = gpar(fontsize = 14))
+y_grob <- textGrob("Predicted Meteor Count", rot = 90, gp = gpar(fontsize = 14))
+grid.arrange(
+  arrangeGrob(p1, p2, p3, p4, ncol = 2),
+  bottom = x_grob,
+  left = y_grob
+)
+
+rmse <- function(actual, predicted) sqrt(mean((actual - predicted)^2))
+
+model_summary <- tibble::tibble(
+  Model = c("Linear Regression", "Neural Net", "Random Forest", "SVM"),
+  R2 = c(lm_r2, nn_r2, rf_r2, svm_r2),
+  Adj_R2 = c(lm_adj_r2, nn_adj_r2, rf_adj_r2, svm_adj_r2),
+  RMSE = c(
+    rmse(cluster_summary$total_meteors, lm_pred),
+    rmse(cluster_summary$total_meteors, nn_pred),
+    rmse(cluster_summary$total_meteors, rf_pred),
+    rmse(cluster_summary$total_meteors, svm_pred)
+  )
+)
+
+print(model_summary)
+make_residual_plot <- function(df, actual, predicted, title, color) {
+  ggplot(df, aes(x = {{actual}}, y = {{actual}} - {{predicted}})) +
+    geom_point(color = color, alpha = 0.6) +
+    geom_hline(yintercept = 0, color = "red", linetype = "dashed") +
+    labs(title = paste0("Residual Plot - ", title),
+         x = "Actual Meteor Count",
+         y = "Residual (Actual - Predicted)") +
+    theme_minimal()
+}
+
+r1 <- make_residual_plot(cluster_summary, total_meteors, lm_pred, "Linear Regression", "orange")
+r2 <- make_residual_plot(scaled_data, total_meteors, nn_pred, "Neural Net", "blue")
+r3 <- make_residual_plot(cluster_summary, total_meteors, rf_pred, "Random Forest", "forestgreen")
+r4 <- make_residual_plot(cluster_summary, total_meteors, svm_pred, "SVM", "purple")
+
+grid.arrange(r1, r2, r3, r4, ncol = 2)
+
+
+# Log-transformed residual QQ plot
+make_log_qq_plot <- function(predicted, actual, title) {
+  # Remove NA values
+  valid_data <- na.omit(data.frame(predicted, actual))
+  
+  # Handle non-positive values (values <= 0)
+  valid_data <- valid_data %>%
+    filter(predicted > 0, actual > 0)  # Only include values > 0
+  
+  residuals_log <- log1p(valid_data$predicted) - log1p(valid_data$actual)  # log1p(x) = log(x + 1)
+  
+  ggplot(data.frame(residuals_log = residuals_log), aes(sample = residuals_log)) +
+    stat_qq() +
+    stat_qq_line(color = "red") +
+    labs(title = title) +
+    theme_minimal() +
+    theme(
+      axis.title.x = element_blank(),
+      axis.title.y = element_blank(),
+      plot.title = element_text(hjust = 0.5),
+      plot.subtitle = element_text(hjust = 0.5)
+    )
+}
+
+qq1_log <- make_log_qq_plot(lm_pred, cluster_summary$total_meteors, "Linear Regression")
+qq2_log <- make_log_qq_plot(nn_pred, scaled_data$total_meteors, "Neural Net")
+qq3_log <- make_log_qq_plot(rf_pred, cluster_summary$total_meteors, "Random Forest")
+qq4_log <- make_log_qq_plot(svm_pred, cluster_summary$total_meteors, "SVM")
+
+x_grob <- textGrob("Theoretical Quantiles", gp = gpar(fontsize = 14))
+y_grob <- textGrob("Sample Quantiles (log residuals)", rot = 90, gp = gpar(fontsize = 14))
+
+# Overarching title for the whole plot grid
+grid.arrange(
+  arrangeGrob(qq1_log, qq2_log, qq3_log, qq4_log, ncol = 2),
+  top = textGrob("Log Transformed QQ Plots", gp = gpar(fontsize = 16, fontface = "bold")),
+  bottom = x_grob,
+  left = y_grob
+)
+
+
+```
+
+```{r Adjusted R Squared of Models vs DBSCAN Epsilon for Simple Models, echo = FALSE}
+for (eps in eps_values) {
+  db <- dbscan(coords, eps = eps, minPts = 2)
+  model_data$cluster_id <- db$cluster
+  cluster_summary_loop <- model_data %>%
+    st_drop_geometry() %>%
+    group_by(cluster_id) %>%
+    summarise(
+      total_meteors = sum(n_meteors, na.rm = TRUE),
+      total_area_km2 = sum(area_km2, na.rm = TRUE),
+      avg_velocity = mean(mean_velocity, na.rm = TRUE),
+      avg_smb = mean(mean_smb, na.rm = TRUE)
+    )
+  if (nrow(cluster_summary_loop) < 5) next
+  try({
+    # ---- Neural Network with Scaling ----
+    scaled_data <- cluster_summary_loop %>%
+      mutate(
+        total_area_km2_scaled = scale(total_area_km2),
+        avg_velocity_scaled = scale(avg_velocity),
+        avg_smb_scaled = scale(avg_smb),
+        total_meteors_scaled = scale(total_meteors)
+      )
+    nn_model <- nnet(
+      total_meteors_scaled ~ total_area_km2_scaled + avg_velocity_scaled + 
+      avg_smb_scaled,
+      data = scaled_data,
+      size = 4,
+      linout = TRUE,
+      trace = FALSE
+    )
+    nn_pred_scaled <- predict(nn_model)
+    nn_pred <- as.vector(nn_pred_scaled * attr(scaled_data$total_meteors_scaled, "scaled:scale") +
+                           attr(scaled_data$total_meteors_scaled, "scaled:center"))
+    nn_r2 <- cor(scaled_data$total_meteors, nn_pred)^2
+    nn_adj_r2 <- 1 - (1 - nn_r2) * (nrow(scaled_data) - 1) / (nrow(scaled_data) - 3 - 1)
+    # ---- Random Forest ----
+    rf_model <- randomForest(total_meteors ~ total_area_km2 + avg_velocity + avg_smb,
+                             data = cluster_summary_loop, ntree = 500)
+    rf_pred <- predict(rf_model)
+    rf_r2 <- cor(cluster_summary_loop$total_meteors, rf_pred)^2
+    rf_adj_r2 <- 1 - (1 - rf_r2) * (nrow(cluster_summary_loop) - 1) / (nrow(cluster_summary_loop) - 3 - 1)
+    # ---- Linear Regression ----
+    lm_model <- lm(total_meteors ~ total_area_km2 + avg_velocity + avg_smb, data = cluster_summary_loop)
+    lm_pred <- predict(lm_model)
+    lm_r2 <- summary(lm_model)$r.squared
+    lm_adj_r2 <- summary(lm_model)$adj.r.squared
+    # ---- SVM ----
+    svm_model <- svm(total_meteors ~ total_area_km2 + avg_velocity + avg_smb, 
+                 data = cluster_summary_loop, 
+                 type = "eps-regression", 
+                 kernel = "radial")
+    svm_pred <- predict(svm_model)
+    svm_r2 <- cor(cluster_summary_loop$total_meteors, svm_pred)^2
+    svm_adj_r2 <- 1 - (1 - svm_r2) * (nrow(cluster_summary_loop) - 1) / (nrow(cluster_summary_loop) - 3 - 1)
+    # ---- Data Collection ----
+    results[[as.character(eps)]] <- data.frame(
+      eps = eps,
+      model = c("Linear Regression", "Neural Net", "Random Forest", "SVM"),
+      r2 = c(lm_r2, nn_r2, rf_r2, svm_r2),
+      adj_r2 = c(lm_adj_r2, nn_adj_r2, rf_adj_r2, svm_adj_r2)
+    )
+  }, silent = TRUE)
+}
+r2_df <- bind_rows(results)
+
+
+# Plot
+ggplot(r2_df, aes(x = eps, y = adj_r2, color = model)) +
+  geom_line(linewidth = 1.5) +  
+  coord_cartesian(xlim = c(7200, 37000), ylim = c(0, 1)) +
+  labs(
+    title = "Adjusted R² of Models vs. DBSCAN Epsilon",
+    x = "DBSCAN epsilon (meters)",
+    y = "Adjusted R²",
+    color = "Model"
+  ) + 
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 18, face = "bold", hjust = 0.5),
+    legend.position = c(0.97, 0.05),
+    legend.justification = c("right", "bottom"),
+    legend.title.align = 0.5,    
+    legend.title = element_text(size = 12, face = "bold"),
+    legend.text = element_text(size = 10),
+    legend.key.width = unit(2, "lines"), 
+    legend.background = element_rect(fill = "white", color = "black", linewidth = 0.5),
+    legend.box.background = element_rect(color = "black", linewidth = 0.8),
+    axis.title.x = element_text(size = 12, face = "bold"),
+    axis.title.y = element_text(size = 16, face = "bold", vjust = 0.5, margin = ggplot2::margin(r = 10)),
+    axis.text.x = element_text(size = 10, face = "bold"),
+    axis.text.y = element_text(size = 10, face = "bold"),
+    panel.border = element_rect(color = "black", fill = NA, linewidth = 1)
+  )
+```
+
+
+```{r Larger Models, echo = TRUE}
+# DBSCAN 
+meteor_polygons <- model_data
+centroids <- st_centroid(meteor_polygons)
+coords <- st_coordinates(centroids)
+db <- dbscan(coords, eps = 15000, minPts = 2)
+meteor_polygons$cluster_id <- db$cluster
+model_data$cluster_id <- db$cluster
+larger_cluster_summary <- meteor_polygons %>%
+  st_drop_geometry() %>%
+  group_by(cluster_id) %>%
+  summarise(
+    total_meteors      = sum(n_meteors, na.rm = TRUE),
+    total_area_km2     = sum(area_km2, na.rm = TRUE),
+    avg_velocity       = mean(mean_velocity, na.rm = TRUE),
+    avg_smb            = mean(mean_smb, na.rm = TRUE),
+    avg_temp           = mean(mean_temperature, na.rm = TRUE),
+    avg_surface        = mean(mean_surface, na.rm = TRUE),
+    avg_thickness      = mean(mean_thickness, na.rm = TRUE),
+    avg_stag           = mean(mean_stagnation, na.rm = TRUE),
+    avg_div            = mean(mean_divergence, na.rm = TRUE)
+  ) %>%
+  arrange(desc(total_meteors))
+# --------------------- Linear Regression ---------------------
+lm_model <- lm(total_meteors ~ total_area_km2 + avg_velocity + avg_smb + avg_temp + avg_thickness + avg_surface + avg_stag + avg_div,
+               data = larger_cluster_summary)
+lm_pred <- predict(lm_model)
+
+
+# --------------------- Neural Network ---------------------
+larger_scaled_data <- larger_cluster_summary %>%
+  mutate(
+    total_area_km2_scaled = scale(total_area_km2),
+    avg_velocity_scaled    = scale(avg_velocity),
+    avg_smb_scaled         = scale(avg_smb),
+    total_meteors_scaled    = scale(total_meteors),
+    avg_temp_scaled    = scale(avg_temp),
+    avg_surface_scaled    = scale(avg_surface),
+    avg_thickness_scaled    = scale(avg_thickness),
+    avg_div_scaled         = scale(avg_div),
+    avg_stag_scaled     = scale(avg_stag)
+  )
+
+nn_model <- nnet(
+  total_meteors_scaled ~ total_area_km2_scaled + avg_velocity_scaled + avg_smb_scaled + avg_thickness_scaled + avg_temp_scaled + avg_surface_scaled + avg_div_scaled + avg_stag_scaled,
+  data = larger_scaled_data,
+  size = 8,
+  linout = TRUE,
+  trace = FALSE
+)
+nn_pred_scaled <- predict(nn_model)
+nn_pred <- as.vector(nn_pred_scaled * attr(larger_scaled_data$total_meteors_scaled, "scaled:scale") +
+                       attr(larger_scaled_data$total_meteors_scaled, "scaled:center"))
+
+# --------------------- Random Forest ---------------------
+rf_model <- randomForest(
+  total_meteors ~ total_area_km2 + avg_velocity + avg_smb + avg_temp + avg_thickness + avg_surface + avg_stag + avg_div,
+  data = larger_cluster_summary,
+  ntree = 500
+)
+rf_pred <- predict(rf_model)
+
+importance_df <- data.frame(
+  Variable = rownames(importance(rf_model)),
+  Importance = importance(rf_model)[, 1]
+)
+
+# --------------------- SVM ---------------------
+svm_model <- svm(
+  total_meteors ~ total_area_km2 + avg_velocity + avg_smb + avg_temp + avg_thickness + avg_surface + avg_stag + avg_div,
+  data = larger_cluster_summary,
+  type = "eps-regression",
+  kernel = "radial"
+)
+svm_pred <- predict(svm_model)
+
+
+# ---------------- Model Analysis ----------------
+n <- nrow(larger_cluster_summary)
+p <- 8  
+y_true <- larger_cluster_summary$total_meteors
+adjusted_r2 <- function(y_true, y_pred, n, p) {
+  ss_total <- sum((y_true - mean(y_true))^2)
+  ss_res <- sum((y_true - y_pred)^2)
+  r2 <- 1 - (ss_res / ss_total)
+  adj_r2 <- 1 - ((1 - r2) * (n - 1)) / (n - p - 1)
+  return(adj_r2)
+}
+svm_adj_r2 <- adjusted_r2(y_true, svm_pred, n, p)
+nn_adj_r2 <- adjusted_r2(y_true, nn_pred, n, p)
+rf_adj_r2 <- adjusted_r2(y_true, rf_pred, n, p)
+lm_adj_r2 <- adjusted_r2(y_true, lm_pred, n, p)
+```
+
+```{r Larger Models Visualization, echo = TRUE}
+# ---- Visualization ----
+ggplot(importance_df, aes(x = reorder(Variable, Importance), y = Importance)) +
+  geom_bar(stat = "identity", fill = "skyblue") +
+  coord_flip() +
+  labs(title = "Variable Importance of Predictors", subtitle = "Using Random Forest Model", x = "Predictor", y = "Importance") +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 18, face = "bold", hjust = 0.5),
+    plot.subtitle = element_text(size = 16, hjust = 0.5),
+    axis.title = element_text(size = 14),
+    axis.text = element_text(size = 12)
+  )
+
+make_plot <- function(df, actual, predicted, title, color, adj_r2) {
+  ggplot(df, aes(x = {{actual}}, y = {{predicted}})) +
+    geom_point(color = color, alpha = 0.6) +
+    geom_abline(slope = 1, intercept = 0, color = "red") +
+    coord_cartesian(xlim = c(0,2000), ylim = c(0,2000)) +
+    labs(title = title,
+         subtitle = paste0("Adjusted R² = ", round(adj_r2, 2))) +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(hjust = 0.5),
+      plot.subtitle = element_text(hjust = 0.5),
+      axis.title.x = element_blank(),
+      axis.title.y = element_blank()
+    )
+}
+p1 <- make_plot(larger_cluster_summary, total_meteors, lm_pred, "Linear Regression", "orange", lm_adj_r2)
+p2 <- make_plot(larger_scaled_data, total_meteors, nn_pred, "Neural Net", "blue", nn_adj_r2)
+p3 <- make_plot(larger_cluster_summary, total_meteors, rf_pred, "Random Forest", "forestgreen", rf_adj_r2)
+p4 <- make_plot(larger_cluster_summary, total_meteors, svm_pred, "Support Vector Machines", "purple", svm_adj_r2)
+
+x_grob <- textGrob("Actual Meteor Count", gp = gpar(fontsize = 14))
+y_grob <- textGrob("Predicted Meteor Count", rot = 90, gp = gpar(fontsize = 14))
+grid.arrange(
+  arrangeGrob(p1, p2, p3, p4, ncol = 2),
+  bottom = x_grob,
+  left = y_grob
+)
+
+rmse <- function(actual, predicted) sqrt(mean((actual - predicted)^2))
+
+model_summary <- tibble::tibble(
+  Model = c("Linear Regression", "Neural Net", "Random Forest", "SVM"),
+  Adj_R2 = c(lm_adj_r2, nn_adj_r2, rf_adj_r2, svm_adj_r2),
+  RMSE = c(
+    rmse(larger_cluster_summary$total_meteors, lm_pred),
+    rmse(larger_cluster_summary$total_meteors, nn_pred),
+    rmse(larger_cluster_summary$total_meteors, rf_pred),
+    rmse(larger_cluster_summary$total_meteors, svm_pred)
+  )
+)
+
+print(model_summary)
+make_residual_plot <- function(df, actual, predicted, title, color) {
+  ggplot(df, aes(x = {{actual}}, y = {{actual}} - {{predicted}})) +
+    geom_point(color = color, alpha = 0.6) +
+    geom_hline(yintercept = 0, color = "red", linetype = "dashed") +
+    scale_x_continuous(trans = "log1p", n.breaks = 3) +
+    labs(
+      title = title,
+      x = NULL,  
+      y = NULL   
+    ) +
+    theme_minimal() + 
+    theme(
+      axis.title.x = element_blank(),
+      axis.title.y = element_blank(),
+      plot.title = element_text(hjust = 0.5)
+    )
+}
+
+
+
+r1 <- make_residual_plot(larger_cluster_summary, total_meteors, lm_pred, "Linear Regression", "orange")
+r2 <- make_residual_plot(larger_scaled_data, total_meteors, nn_pred, "Neural Net", "blue")
+r3 <- make_residual_plot(larger_cluster_summary, total_meteors, rf_pred, "Random Forest", "forestgreen")
+r4 <- make_residual_plot(larger_cluster_summary, total_meteors, svm_pred, "SVM", "purple")
+
+x_grob <- textGrob("Log(Actual Meteor Count + 1)", gp = gpar(fontsize = 14))
+y_grob <- textGrob("Residual (Actual - Predicted)", rot = 90, gp = gpar(fontsize = 14))
+
+grid.arrange(
+  arrangeGrob(r1, r2, r3, r4, ncol = 2),
+  top = textGrob("Residual Plots", gp = gpar(fontsize = 16, fontface = "bold")),
+  bottom = x_grob,
+  left = y_grob
+)
+
+
+
+# Log-transformed residual QQ plot
+make_log_qq_plot <- function(predicted, actual, title) {
+  valid_data <- na.omit(data.frame(predicted, actual))
+  valid_data <- valid_data %>%
+    filter(predicted > 0, actual > 0)  
+  
+  residuals_log <- log1p(valid_data$predicted) - log1p(valid_data$actual)  # log1p(x) = log(x + 1)
+  
+  ggplot(data.frame(residuals_log = residuals_log), aes(sample = residuals_log)) +
+    stat_qq() +
+    stat_qq_line(color = "red") +
+    labs(title = title) +
+    theme_minimal() +
+    theme(
+      axis.title.x = element_blank(),
+      axis.title.y = element_blank(),
+      plot.title = element_text(hjust = 0.5),
+      plot.subtitle = element_text(hjust = 0.5)
+    )
+}
+
+qq1_log <- make_log_qq_plot(lm_pred, larger_cluster_summary$total_meteors, "Linear Regression")
+qq2_log <- make_log_qq_plot(nn_pred, larger_scaled_data$total_meteors, "Neural Net")
+qq3_log <- make_log_qq_plot(rf_pred, larger_cluster_summary$total_meteors, "Random Forest")
+qq4_log <- make_log_qq_plot(svm_pred, larger_cluster_summary$total_meteors, "SVM")
+
+x_grob <- textGrob("Theoretical Quantiles", gp = gpar(fontsize = 14))
+y_grob <- textGrob("Sample Quantiles (log residuals)", rot = 90, gp = gpar(fontsize = 14))
+
+grid.arrange(
+  arrangeGrob(qq1_log, qq2_log, qq3_log, qq4_log, ncol = 2),
+  top = textGrob("Log Transformed QQ Plots", gp = gpar(fontsize = 16, fontface = "bold")),
+  bottom = x_grob,
+  left = y_grob
+)
+
+```
+
+```{r, Comparing Adjusted R^2 for Larger Models vs DBSCAN epsilon, echo = TRUE}
+meteor_polygons <- model_data
+centroids <- st_centroid(meteor_polygons)
+coords <- st_coordinates(centroids)
+larger_eps_values <- seq(1000, 70000, by = 4000)
+cluster_counts <- data.frame()
+for (eps in larger_eps_values) {
+  db <- dbscan(coords, eps = eps, minPts = 2)
+  model_data$cluster_id <- db$cluster
+  larger_cluster_summary_loop <- model_data %>%
+    st_drop_geometry() %>%
+    group_by(cluster_id) %>%
+    summarise(
+      total_meteors      = sum(n_meteors, na.rm = TRUE),
+      total_area_km2     = sum(area_km2, na.rm = TRUE),
+      avg_velocity       = mean(mean_velocity, na.rm = TRUE),
+      avg_smb            = mean(mean_smb, na.rm = TRUE),
+      avg_temp           = mean(mean_temperature, na.rm = TRUE),
+      avg_surface        = mean(mean_surface, na.rm = TRUE),
+      avg_thickness      = mean(mean_thickness, na.rm = TRUE),
+      avg_stag           = mean(mean_stagnation, na.rm = TRUE),
+      avg_div            = mean(mean_divergence, na.rm = TRUE)
+    ) 
+  if (nrow(larger_cluster_summary_loop) < 5) next
+  try({
+    # ---- Neural Network with Scaling ----
+larger_scaled_data <- larger_cluster_summary %>%
+  mutate(
+    total_area_km2_scaled = scale(total_area_km2),
+    avg_velocity_scaled    = scale(avg_velocity),
+    avg_smb_scaled         = scale(avg_smb),
+    total_meteors_scaled    = scale(total_meteors),
+    avg_temp_scaled    = scale(avg_temp),
+    avg_surface_scaled    = scale(avg_surface),
+    avg_thickness_scaled    = scale(avg_thickness),
+    avg_div_scaled         = scale(avg_div),
+    avg_stag_scaled     = scale(avg_stag)
+  )
+
+nn_model <- nnet(
+  total_meteors_scaled ~ total_area_km2_scaled + avg_velocity_scaled + avg_smb_scaled + avg_thickness_scaled + avg_temp_scaled + avg_surface_scaled + avg_div_scaled + avg_stag_scaled,
+  data = larger_scaled_data,
+  size = 4,
+  linout = TRUE,
+  trace = FALSE
+)
+    nn_pred_scaled <- predict(nn_model)
+    nn_pred <- as.vector(nn_pred_scaled * attr(larger_scaled_data$total_meteors_scaled, "scaled:scale") +
+                           attr(larger_scaled_data$total_meteors_scaled, "scaled:center"))
+    nn_r2 <- cor(larger_scaled_data$total_meteors, nn_pred)^2
+    nn_adj_r2 <- 1 - (1 - nn_r2) * (nrow(larger_scaled_data) - 1) / (nrow(larger_scaled_data) - p - 1)
+    # ---- Random Forest ----
+    rf_model <- randomForest(total_meteors ~ total_area_km2 + avg_velocity + avg_smb + avg_temp + avg_thickness + avg_surface + avg_stag + avg_div,
+                             data = larger_cluster_summary_loop, ntree = 500)
+    rf_pred <- predict(rf_model)
+    rf_r2 <- cor(larger_cluster_summary_loop$total_meteors, rf_pred)^2
+    rf_adj_r2 <- 1 - (1 - rf_r2) * (nrow(larger_cluster_summary_loop) - 1) / (nrow(larger_cluster_summary_loop) - p - 1)
+    # ---- Linear Regression ----
+    lm_model <- lm(total_meteors ~ total_area_km2 + avg_velocity + avg_smb + avg_temp + avg_thickness + avg_surface + avg_stag + avg_div, data = larger_cluster_summary_loop)
+    lm_pred <- predict(lm_model)
+    lm_r2 <- summary(lm_model)$r.squared
+    lm_adj_r2 <- summary(lm_model)$adj.r.squared
+    # ---- SVM ----
+    svm_model <- svm(total_meteors ~ total_area_km2 + avg_velocity + avg_smb + avg_temp + avg_thickness + avg_surface + avg_stag + avg_div, 
+                 data = larger_cluster_summary_loop, 
+                 type = "eps-regression", 
+                 kernel = "radial")
+    svm_pred <- predict(svm_model)
+    svm_r2 <- cor(larger_cluster_summary_loop$total_meteors, svm_pred)^2
+    svm_adj_r2 <- 1 - (1 - svm_r2) * (nrow(larger_cluster_summary_loop) - 1) / (nrow(larger_cluster_summary_loop) - p - 1)
+    # ---- Data Collection ----
+    results[[as.character(eps)]] <- data.frame(
+      eps = eps,
+      model = c("Linear Regression", "Neural Net", "Random Forest", "SVM"),
+      r2 = c(lm_r2, nn_r2, rf_r2, svm_r2),
+      adj_r2 = c(lm_adj_r2, nn_adj_r2, rf_adj_r2, svm_adj_r2)
+    )
+  }, silent = TRUE)
+}
+r2_df <- bind_rows(results)
+
+
+# Plot
+ggplot(r2_df, aes(x = eps, y = adj_r2, color = model)) +
+  geom_line(linewidth = 1.5) +  
+  coord_cartesian(xlim = c(7200, 77000), ylim = c(0, 1)) +
+  labs(
+    title = "Adjusted R² of Models vs. DBSCAN Epsilon",
+    x = "DBSCAN epsilon (meters)",
+    y = "Adjusted R²",
+    color = "Model"
+  ) + 
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 18, face = "bold", hjust = 0.5),
+    legend.position = c(0.97, 0.05),
+    legend.justification = c("right", "bottom"),
+    legend.title.align = 0.5,    
+    legend.title = element_text(size = 12, face = "bold"),
+    legend.text = element_text(size = 10),
+    legend.key.width = unit(2, "lines"), 
+    legend.background = element_rect(fill = "white", color = "black", linewidth = 0.5),
+    legend.box.background = element_rect(color = "black", linewidth = 0.8),
+    axis.title.x = element_text(size = 12, face = "bold"),
+    axis.title.y = element_text(size = 16, face = "bold", vjust = 0.5, margin = ggplot2::margin(r = 10)),
+    axis.text.x = element_text(size = 10, face = "bold"),
+    axis.text.y = element_text(size = 10, face = "bold"),
+    panel.border = element_rect(color = "black", fill = NA, linewidth = 1)
+  )
+
+```
+
+
+
